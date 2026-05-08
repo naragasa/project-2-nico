@@ -8,9 +8,9 @@ format:
       - linkedin
       - twitter
       - github
+embed-resources: true
 execute: 
   warning: false
-  embed-resources: true
   code-fold: true
 ---
 
@@ -193,11 +193,23 @@ country_meta_data <- country_data |>
 ```
 
 ```{r}
+
 country_meta_data <- country_meta_data |>
-  mutate(gov_type = ifelse(is_communist == TRUE, "Communist",
-                           ifelse(is_democracy == TRUE, "Democracy",
-                                  ifelse(is_monarchy == TRUE, "Monarchy", "Other")))
-         )
+  filter(!is.na(regime_category_index)) |> 
+  mutate(gov_type = case_when(
+    is_communist == TRUE ~ "Communist",
+    is_democracy == TRUE & is_monarchy == TRUE ~ "Democratic Monarchy",
+    is_democracy == TRUE & is_monarchy == FALSE ~ "Pure Democracy",
+    is_democracy == FALSE & is_monarchy == TRUE ~ "Pure Monarchy",
+    TRUE ~ "Other"), 
+    regime_category = case_when(
+    regime_category_index == 0 ~ "Parliamentary democracy",
+    regime_category_index == 1 ~ "Mixed democratic", 
+    regime_category_index == 2 ~ "Presidential democracy",
+    regime_category_index == 3 ~ "Civilian dictatorship", 
+    regime_category_index == 4 ~ "Military dictatorship",
+    regime_category_index == 5 ~ "Royal dictatorship")
+  )
 
 ```
 
@@ -478,7 +490,90 @@ Coloring each country by GDP
 
 ```{r}
 
-plot(iris)
+library(sf)
+library(leaflet)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+global_map <- ne_countries(scale = "medium", returnclass = "sf")
+
+center_coords <- global_map |>
+  st_centroid() |>
+  st_coordinates() |>
+  as.tibble()
+
+country_centers <- tibble(iso_a3 = global_map$iso_a3,
+                          lon = center_coords$X,
+                          lat = center_coords$Y
+) |>
+  select(iso_a3, lon, lat) |>
+  filter(!is.na(lon),
+         !is.na(lat))
+
+world_map <- global_map |>
+  left_join(country_centers,
+            by = "iso_a3")
+
+
+
+global_gdps <- country_meta_data |>
+  select(Country, gov_type, GDP, iso3c)
+
+GDP_with_Coords <- global_gdps |>
+  left_join(world_map,
+            by = c("iso3c" = "iso_a3"))
+
+GDP_with_Coords <- st_as_sf(GDP_with_Coords)
+
+
+
+my_palette <- c("#C51517",
+                "#F3A360",
+                "#7AC7E2",
+                "#1C5A99",
+                "#F1FABF"
+)
+
+palette_levels <- c("Communist",
+                    "Pure Monarchy",
+                    "Democratic Monarchy",
+                    "Pure Democracy",
+                    "Other")
+
+gov_cols <- colorFactor(
+  palette = my_palette,
+  levels = palette_levels,
+  domain = GDP_with_Coords$gov_type
+)
+
+GDP_with_Coords |>
+  leaflet() |>
+  addTiles() |>
+  addPolygons(color = "black",
+              weight = 1,
+              opacity = 1,
+              fillColor = ~gov_cols(gov_type),
+              fillOpacity = 1,
+  ) |>
+  addLegend(pal = gov_cols,
+            values = ~factor(gov_type,
+                             levels = c("Communist",
+                                        "Pure Monarchy",
+                                        "Democratic Monarchy",
+                                        "Pure Democracy",
+                                        "Other")
+            ),
+            title = "Government Type"
+  ) |>
+  addCircleMarkers(radius =  ~sqrt(GDP) / 5,
+                   lng = ~lon,
+                   lat = ~lat,
+                   weight = 2,
+                   color = "#43BD00",
+                   opacity = 1,
+                   label = ~glue("{name}: GDP = ${GDP}B"),
+                   labelOptions = labelOptions(textsize = "15px")
+  )
 
 ```
 
@@ -492,11 +587,9 @@ plot(iris)
 
 ::: {.panel-tabset}
 
-### Why China?
-
-Looking at the GDP data, we see that the 'Communist' Government Type has a very high average along with a high standard deviation. Looking deeper into the individual 2020 GDP country data, we noticed that China was a huge outlier and decided to take a look into the GDP of China from 1960-2020.
-
 ### China Data
+
+Looking at the GDP data, we see that the 'Communist' Government Type has a very high average along with a high standard deviation. Looking deeper into the individual 2020 GDP country data, we noticed that China was a huge outlier and decided to take a look into the GDP of China from 1981-2020.
 
 ```{r}
 country_meta_data |> 
@@ -535,13 +628,12 @@ get_gdp_china <- function(year, key = my_key)
 ```
 
 ```{r}
-
 #| eval: false
 
 # Get GDP for China
 china_gdps <- map_dbl(.x = 1981:2020, .f = get_gdp_china)
 
-# Store GDP with country code as a tibble
+# Store GDP with years as a tibble
 china_gdps <- tibble(years = 1981:2020, GDP = china_gdps)
 
 # Save tibble as a csv
@@ -572,18 +664,21 @@ library(gifski)
 
 p <- china_gdps |> 
   ggplot(aes(x = years, y = GDP)) + 
-  geom_line() + 
+  geom_area(stat = "identity",
+            fill = "#43BD00") +
+  geom_line(color = "black") + 
   geom_point() +
   theme(legend.position = "none") +
   theme_bw() +
   labs(
     title = "GDP of China in USD from 1981-2020",
-    x = "",
+    x = "Year",
     y = "GDP (Billions)") +
   transition_reveal(years)
 
 china_anim <- animate(p, nframes = 100, fps = 10, end_pause = 30, renderer = gifski_renderer(tempfile(fileext = ".gif")))
 anim_save("china_gdps_over_time.gif", china_anim)
+
 china_anim
 ```
 
