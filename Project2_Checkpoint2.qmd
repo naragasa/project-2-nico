@@ -8,10 +8,12 @@ format:
       - linkedin
       - twitter
       - github
+    orientation: columns
 embed-resources: true
 execute: 
   warning: false
   code-fold: true
+  cache: true
 ---
 
 
@@ -549,6 +551,7 @@ gov_cols <- colorFactor(
 GDP_with_Coords |>
   leaflet() |>
   addTiles() |>
+  setView(lat = 0, lng = 0, zoom = 1.1) |>
   addPolygons(color = "black",
               weight = 1,
               opacity = 1,
